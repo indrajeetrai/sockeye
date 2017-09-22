@@ -64,23 +64,27 @@ class ConvolutionBlock:
 
     def __call__(self, data: mx.sym.Symbol,
                  data_length: mx.sym.Symbol,
-                 seq_len: int) -> mx.sym.Symbol:
+                 seq_len: int,
+                 skip_padding=False) -> mx.sym.Symbol:
         """
         :param data: Input data. Shape: (batch_size, seq_len, num_hidden).
         :param data_length: Vector with sequence lengths. Shape: (batch_size,).
         :param seq_len: Maximum sequence length.
         :return: Symbol(batch_size, seq_len, num_hidden)
         """
-        if self.pad_type == 'left':
-            # we pad enough on both sides and later slice the extra padding from the right
-            padding = (self.config.kernel_width - 1,)
-        elif self.pad_type == 'centered':
-            # we pad enough so that the output size is equal to the input size and we don't need to slice
-            utils.check_condition(self.config.kernel_width % 2 == 1,
-                                  "Only odd kernel widths supported, but got %d" % self.config.kernel_width)
-            padding = (int((self.config.kernel_width - 1)/2),)
+        if skip_padding:
+            padding = None
         else:
-            raise ValueError("Unknown pad type %s" % self.pad_type)
+            if self.pad_type == 'left':
+                # we pad enough on both sides and later slice the extra padding from the right
+                padding = (self.config.kernel_width - 1,)
+            elif self.pad_type == 'centered':
+                # we pad enough so that the output size is equal to the input size and we don't need to slice
+                utils.check_condition(self.config.kernel_width % 2 == 1,
+                                      "Only odd kernel widths supported, but got %d" % self.config.kernel_width)
+                padding = (int((self.config.kernel_width - 1)/2),)
+            else:
+                raise ValueError("Unknown pad type %s" % self.pad_type)
 
         if self.config.act_type == "glu":
             num_hidden = 2 * self.config.num_hidden
@@ -94,6 +98,7 @@ class ConvolutionBlock:
         data = mx.sym.SequenceMask(data=data, sequence_length=data_length, use_sequence_length=True, value=0)
 
         #TODO: better to transpose or to set the layout in the convolution? Do a speed comparison...
+        #TODO: does it make sense to implement convolutions for single time steps as FullyConnected (speed comparison...)
         # (batch_size,  num_hidden, seq_len)
         data = mx.sym.transpose(data, axes=(1, 2, 0))
         data_conv = mx.sym.Convolution(data=data,
@@ -105,7 +110,7 @@ class ConvolutionBlock:
                                        layout="NCW")
 
         # (batch_size, 2 * num_hidden, seq_len)
-        if self.pad_type == 'left':
+        if not skip_padding and self.pad_type == 'left':
             data_conv = mx.sym.slice_axis(data=data_conv, axis=2, begin=0, end=seq_len)
 
         if self.config.act_type == "glu":
