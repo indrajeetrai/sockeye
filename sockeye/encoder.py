@@ -395,6 +395,28 @@ class AdditivePositionalEmbedding(Encoder):
                                          name=self.prefix + "pos_embed")
         return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len
 
+    def encode_positions(self,
+                         positions: mx.sym.Symbol,
+                         data: mx.sym.Symbol,
+                         data_length: mx.sym.Symbol,
+                         seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+
+       :param positions: (batch_size, source_seq_len)
+       :param data: (batch_size, source_seq_len, num_embed)
+       :param data_length: (batch_size,)
+       :param seq_len: sequence length.
+       :return: (batch_size, source_seq_len, num_embed)
+       """
+
+        # (batch_size, source_seq_len, num_embed)
+        pos_embedding = mx.sym.Embedding(data=positions,
+                                         input_dim=self.max_seq_len,
+                                         weight=self.embed_weight,
+                                         output_dim=self.num_embed,
+                                         name=self.prefix + "pos_embed")
+        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len
+
     def get_num_hidden(self) -> int:
         return self.num_embed
 

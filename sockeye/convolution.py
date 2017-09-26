@@ -101,13 +101,21 @@ class ConvolutionBlock:
         #TODO: does it make sense to implement convolutions for single time steps as FullyConnected (speed comparison...)
         # (batch_size,  num_hidden, seq_len)
         data = mx.sym.transpose(data, axes=(1, 2, 0))
-        data_conv = mx.sym.Convolution(data=data,
-                                       weight=self.conv_weight,
-                                       bias=self.conv_bias,
-                                       pad=padding,
-                                       kernel=(self.config.kernel_width,),
-                                       num_filter=num_hidden,
-                                       layout="NCW")
+        if skip_padding:
+            data_conv = mx.sym.Convolution(data=data,
+                               weight=self.conv_weight,
+                               bias=self.conv_bias,
+                               kernel=(self.config.kernel_width,),
+                               num_filter=num_hidden,
+                               layout="NCW")
+        else:
+            data_conv = mx.sym.Convolution(data=data,
+                                           weight=self.conv_weight,
+                                           bias=self.conv_bias,
+                                           pad=padding,
+                                           kernel=(self.config.kernel_width,),
+                                           num_filter=num_hidden,
+                                           layout="NCW")
 
         # (batch_size, 2 * num_hidden, seq_len)
         if not skip_padding and self.pad_type == 'left':

@@ -987,6 +987,7 @@ class ConvolutionalDecoder(Decoder):
         else:
             self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
+        self.decode_fast = True
 
     def decode_sequence(self,
                         source_encoded: mx.sym.Symbol,
@@ -1053,12 +1054,11 @@ class ConvolutionalDecoder(Decoder):
         target_lengths = utils.compute_lengths(target)
         indices = target_lengths - 1
 
-
-        if True:
+        if not self.decode_fast:
             # "naive" implementation:
             source_encoded, source_encoded_lengths, *layer_inputs = states
 
-           # (batch_size, target_max_length, 1)
+            # (batch_size, target_max_length, 1)
             mask = mx.sym.expand_dims(mx.sym.one_hot(indices=indices,
                                                      depth=target_max_length,
                                                      on_value=1, off_value=0), axis=2)
@@ -1084,61 +1084,86 @@ class ConvolutionalDecoder(Decoder):
             attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
             return logits, attention_probs, [source_encoded, source_encoded_lengths]
         else:
-            # optimized implementation (simply avoids doing the same computation more than once):
-            #source_encoded: (batch_size, source_encoded_max_length, encoder_depth)
+            # Faster implementation (simply avoids doing the same computation more than once):
+            # Source_encoded: (batch_size, source_encoded_max_length, encoder_depth)
             source_encoded, source_encoded_lengths, *layer_states = states
 
             # The last layer doesn't keep any state as we only need the last hidden vector for the next word prediction
             # but none of the previous hidden vectors
             last_layer_state = None
-            layer_states = layer_states + [last_layer_state]
+            embed_layer_state = layer_states[0]
+            cnn_layer_states = layer_states[1:] + [last_layer_state]
 
-            target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
+            kernel_width = self.config.cnn_config.kernel_width
+
+            new_layer_states = []
+
+            # (batch_size,)
+            prev_word_id = mx.sym.pick(target, indices, axis=1)
+
+            # (batch_size, num_embed)
+            target_embed, target_lengths, target_max_length = self.embedding.encode(prev_word_id,
+                                                                                    target_lengths,
                                                                                     target_max_length)
-            target_embed, target_lengths, target_max_length = self.pos_embedding.encode(target_embed,
-                                                                                        target_lengths,
-                                                                                        target_max_length)
+            # (batch_size, num_embed)
+            target_embed, target_lengths, target_max_length = self.pos_embedding.encode_positions(indices,
+                                                                                                  target_embed,
+                                                                                                  target_lengths,
+                                                                                                  target_max_length)
 
-            target_hidden = mx.sym.reshape(target_embed, shape=(-3, -1))
-            target_hidden = mx.sym.FullyConnected(data=target_hidden,
-                                                  num_hidden=self.config.cnn_config.num_hidden,
-                                                  no_bias=True,
-                                                  weight=self.i2h_weight)
+            # (batch_size, num_hidden)
+            target_hidden_step = mx.sym.FullyConnected(data=target_embed,
+                                                       num_hidden=self.config.cnn_config.num_hidden,
+                                                       no_bias=True,
+                                                       weight=self.i2h_weight)
             # re-arrange outcoming layer to the dimensions of the output
-            # (batch_size, target_seq_len, num_hidden)
-            target_hidden = mx.sym.reshape(target_hidden, shape=(-1, target_max_length, self.config.cnn_config.num_hidden))
-            target_hidden_prev = target_hidden
+            # (batch_size, 1, num_hidden)
+            target_hidden_step = mx.sym.expand_dims(target_hidden_step, axis=1)
+            # (batch_size, kernel_width, num_hidden)
+            target_hidden = mx.sym.concat(embed_layer_state, target_hidden_step, dim=1)
+
+            new_layer_states.append(mx.sym.slice_axis(data=target_hidden, axis=1, begin=1, end=kernel_width))
+
+            target_hidden_step_prev = target_hidden_step
 
             drop_prob = self.config.hidden_dropout
 
-            # TODO: the latest layer needs special treatment (we just need the last hidden and have no layer_state)
-            for layer, layer_state in zip(self.layers, layer_states):
+            for layer, layer_state in zip(self.layers, cnn_layer_states):
                 # (batch_size, kernel_width, num_hidden) -> (batch_size, 1, num_hidden)
-                target_hidden = layer(mx.sym.Dropout(target_hidden, p=drop_prob) if drop_prob > 0 else target_hidden,
-                                      target_lengths, target_max_length, skip_padding=True)
+                target_hidden_step = layer(mx.sym.Dropout(target_hidden, p=drop_prob)
+                                           if drop_prob > 0 else target_hidden,
+                                           target_lengths, target_max_length, skip_padding=True)
 
                 # (batch_size, 1, num_embed)
-                context = layers.dot_attention(queries=target_hidden,
-                                               keys=source_encoded, values=source_encoded,
-                                               length=source_encoded_lengths)
+                context_step = layers.dot_attention(queries=target_hidden_step,
+                                                    keys=source_encoded, values=source_encoded,
+                                                    length=source_encoded_lengths)
                 # (batch_size, 1, num_embed)
-                target_hidden = target_hidden + context
-
-                # combine with layer state
-                # layer_state: (batch_size, kernel_width, num_hidden)
-                # new_hidden: (batch_size, 1, num_embed)
-                #TODO: we could use pad here...
+                # residual connection:
+                target_hidden_step = target_hidden_step_prev + target_hidden_step + context_step
+                target_hidden_step_prev = target_hidden_step
 
                 if layer_state is not None:
-                    # residual connection:
-                    target_hidden = target_hidden_prev + target_hidden + context
-                    target_hidden_prev = target_hidden
+                    # combine with layer state (slice to concat version)
+                    # (batch_size, kernel_width, num_hidden)
+                    target_hidden = mx.sym.concat(layer_state, target_hidden_step, dim=1)
+
+                    new_layer_states.append(mx.sym.slice_axis(data=target_hidden, axis=1, begin=1, end=kernel_width))
+
                 else:
-                    # last state ... treat differently
-                    pass
+                    # last state, here we only care about the latest hidden state:
+                    # (batch_size, 1, num_hidden) -> (batch_size, num_hidden)
+                    target_hidden = mx.sym.reshape(target_hidden_step, shape=(-3, -1))
 
-            #TODO: shift all hidden states by one... (either here or further up)
+            # (batch_size, source_encoded_max_length)
+            attention_probs = mx.sym.reshape(mx.sym.slice_axis(mx.sym.zeros_like(source_encoded),
+                                                               axis=2, begin=0, end=1),
+                                             shape=(0, -1))
 
+            # (batch_size, vocab_size)
+            logits = mx.sym.FullyConnected(data=target_hidden, num_hidden=self.config.vocab_size,
+                                           weight=self.cls_w, bias=self.cls_b, name=C.LOGITS_NAME)
+            return logits, attention_probs, [source_encoded, source_encoded_lengths] + new_layer_states
 
     def _decode(self,
                 source_encoded: mx.sym.Symbol,
@@ -1212,9 +1237,17 @@ class ConvolutionalDecoder(Decoder):
         # (batch_size, kernel_width, num_hidden)
         num_hidden = self.config.cnn_config.num_hidden
         kernel_width = self.config.cnn_config.kernel_width
-        next_layer_inputs = [mx.sym.zeros(shape=(0, kernel_width, num_hidden))
-                             for layer_idx in range(1, self.config.num_layers)]
-        return [source_encoded, source_encoded_lengths] + next_layer_inputs
+        # Note: We can not use mx.sym.zeros, as otherwise shape inference fails.
+        # Therefore we need to get a zero array of the right size through other means.
+        # (batch_size, 1, 1)
+        zeros = mx.sym.expand_dims(mx.sym.expand_dims(mx.sym.zeros_like(source_encoded_lengths), axis=1), axis=2)
+        # (batch_size, kernel_width-1, num_hidden)
+        zeros = mx.sym.tile(data=zeros, reps=(1, kernel_width-1, num_hidden))
+        next_layer_inputs = [zeros for layer_idx in range(0, self.config.num_layers)]
+        if self.decode_fast:
+            return [source_encoded, source_encoded_lengths] + next_layer_inputs
+        else:
+            return [source_encoded, source_encoded_lengths]
 
     def state_variables(self) -> List[mx.sym.Symbol]:
         """
@@ -1224,9 +1257,13 @@ class ConvolutionalDecoder(Decoder):
         """
         # we keep a fixed slice of the layer inputs as a state for all upper layers:
         next_layer_inputs = [mx.sym.Variable("cnn_layer%d_in" % layer_idx)
-                             for layer_idx in range(1, self.config.num_layers)]
-        return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
-                mx.sym.Variable(C.SOURCE_LENGTH_NAME)] + next_layer_inputs
+                             for layer_idx in range(0, self.config.num_layers)]
+        if self.decode_fast:
+            return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
+                    mx.sym.Variable(C.SOURCE_LENGTH_NAME)] + next_layer_inputs
+        else:
+            return [mx.sym.Variable(C.SOURCE_ENCODED_NAME),
+                    mx.sym.Variable(C.SOURCE_LENGTH_NAME)]
 
     def state_shapes(self,
                      batch_size: int,
@@ -1244,13 +1281,19 @@ class ConvolutionalDecoder(Decoder):
         num_hidden = self.config.cnn_config.num_hidden
         kernel_width = self.config.cnn_config.kernel_width
         next_layer_inputs = [mx.io.DataDesc("cnn_layer%d_in" % layer_idx,
-                                            shape=(0, kernel_width, num_hidden),
+                                            shape=(batch_size, kernel_width-1, num_hidden),
                                             layout="NTW")
-                             for layer_idx in range(1, self.config.num_layers)]
-        return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
-                               (batch_size, source_encoded_max_length, source_encoded_depth),
-                               layout=C.BATCH_MAJOR),
-                mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")] + next_layer_inputs
+                             for layer_idx in range(0, self.config.num_layers)]
+        if self.decode_fast:
+            return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
+                                   (batch_size, source_encoded_max_length, source_encoded_depth),
+                                   layout=C.BATCH_MAJOR),
+                    mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")] + next_layer_inputs
+        else:
+            return [mx.io.DataDesc(C.SOURCE_ENCODED_NAME,
+                                   (batch_size, source_encoded_max_length, source_encoded_depth),
+                                   layout=C.BATCH_MAJOR),
+                    mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
