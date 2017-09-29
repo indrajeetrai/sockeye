@@ -1011,6 +1011,8 @@ class ConvolutionalDecoder(Decoder):
                  Shape: (batch_size * target_max_length, target_vocab_size)
         """
 
+        check_condition(source_lexicon is None, "Source lexicon not supported.")
+
         # (batch_size, source_encoded_max_length, encoder_depth).
         source_encoded_batch_major = mx.sym.swapaxes(source_encoded, dim1=0, dim2=1, name='source_encoded_batch_major')
 
@@ -1035,16 +1037,14 @@ class ConvolutionalDecoder(Decoder):
                 target_lengths: mx.sym.Symbol,
                 target_max_length: int) -> mx.sym.Symbol:
         """
-        Decode the target. This includes everything that can be shared between `decode_step` and `decode_sequence`.
-        TODO: document parameters and shapes.
+        Decode the target and produce a sequence of hidden states.
 
         :param source_encoded:  Shape: (batch_size, source_encoded_max_length, encoder_depth).
-        :param source_encoded_lengths:
-        :param source_encoded_max_length:
-        :param target:
-        :param target_lengths:
-        :param target_max_length:
-        :return:
+        :param source_encoded_lengths: Shape: (batch_size,).
+        :param target: Target sequence. Shape: (batch_size, target_max_length).
+        :param target_lengths: Lengths of target sequences. Shape: (batch_size,).
+        :param target_max_length: Size of target sequence dimension.
+        :return: The target hidden states. Shape: (batch_size, target_seq_len, num_hidden).
         """
         # target_embed: (batch_size, target_seq_len, num_target_embed)
         target_embed, target_lengths, target_max_length = self.embedding.encode(target, target_lengths,
