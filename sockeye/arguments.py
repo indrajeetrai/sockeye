@@ -423,10 +423,13 @@ def add_model_parameters(params):
     model_params.add_argument('--layer-normalization', action="store_true",
                               help="Adds layer normalization before non-linear activations. "
                                    "This includes MLP attention, RNN decoder state initialization, "
-                                   "RNN decoder hidden state, transformer layers."
+                                   "RNN decoder hidden state, and cnn layers."
                                    "It does not normalize RNN cell activations "
                                    "(this can be done using the '%s' or '%s' rnn-cell-type." % (C.LNLSTM_TYPE,
                                                                                                 C.LNGLSTM_TYPE))
+
+    model_params.add_argument('--weight-normalization', action="store_true",
+                              help="Adds weight normalization")
 
 
 def add_training_args(params):

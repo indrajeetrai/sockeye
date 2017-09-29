@@ -188,7 +188,7 @@ def main():
         logger.info("Vocabulary sizes: source=%d target=%d", vocab_source_size, vocab_target_size)
 
         # create data iterators
-        max_seq_len_source, max_seq_len_target = args.get_max_seq_len
+        max_seq_len_source, max_seq_len_target = args.max_seq_len
         train_iter, eval_iter, config_data = data_io.get_training_data_iters(source=os.path.abspath(args.source),
                                                                              target=os.path.abspath(args.target),
                                                                              validation_source=os.path.abspath(
@@ -272,7 +272,8 @@ def main():
             encoder_num_hidden = args.cnn_num_hidden
             cnn_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_encoder,
                                                        num_hidden=args.cnn_num_hidden,
-                                                       act_type=args.cnn_activation_type)
+                                                       act_type=args.cnn_activation_type,
+                                                       weight_normalization=args.weight_normalization)
             config_encoder = encoder.ConvolutionalEncoderConfig(vocab_size=vocab_source_size,
                                                                 num_embed=num_embed_source,
                                                                 embed_dropout=encoder_embed_dropout,
@@ -318,7 +319,8 @@ def main():
         elif args.decoder == C.CONVOLUTION_TYPE:
             convolution_config = convolution.ConvolutionConfig(kernel_width=cnn_kernel_width_decoder,
                                                                num_hidden=args.cnn_num_hidden,
-                                                               act_type=args.cnn_activation_type)
+                                                               act_type=args.cnn_activation_type,
+                                                               weight_normalization=args.weight_normalization)
             config_decoder = decoder.ConvolutionalDecoderConfig(cnn_config=convolution_config,
                                                                 vocab_size=vocab_target_size,
                                                                 max_seq_len_target=max_seq_len_target,

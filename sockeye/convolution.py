@@ -17,6 +17,7 @@ Convolutional layers.
 from sockeye.config import Config
 from . import utils
 from . import constants as C
+from . import layers
 
 import mxnet as mx
 
@@ -33,12 +34,16 @@ class ConvolutionConfig(Config):
     def __init__(self,
                  kernel_width: int,
                  num_hidden: int,
-                 act_type: str = C.GLU):
+                 act_type: str = C.GLU,
+                 layer_normalization: bool = False,
+                 weight_normalization: bool = False):
         super().__init__()
         self.kernel_width = kernel_width
         self.num_hidden = num_hidden
         utils.check_condition(act_type in C.CNN_ACTIVATION_TYPES, "Unknown activation %s." % act_type)
         self.act_type = act_type
+        self.layer_normalization = layer_normalization
+        self.weight_normalization = weight_normalization
 
 
 class ConvolutionBlock:
@@ -61,13 +66,20 @@ class ConvolutionBlock:
         self.prefix = prefix
         self.pad_type = pad_type
         self.config = config
-        #TODO: add weight norm
         self.conv_weight = mx.sym.Variable("%sconv_weight" % prefix,
                                            shape=(
                                                self._pre_activation_num_hidden(),
                                                self.config.num_hidden,
                                                self.config.kernel_width)
                                            )
+        if self.config.weight_normalization:
+            self.weight_norm = layers.WeightNormalization(self.conv_weight,
+                                                          self._pre_activation_num_hidden(),
+                                                          ndim=3,
+                                                          prefix=prefix)
+            self.conv_weight = self.weight_norm()
+        else:
+            self.weight_norm = None
         self.conv_bias = mx.sym.Variable("%sconv_bias" % prefix)
 
     def _pre_activation_num_hidden(self):
@@ -152,7 +164,9 @@ class ConvolutionBlock:
         return self._post_convolution(data_conv)
 
     def _post_convolution(self, data_conv):
-        #TODO: add layer norm
+        # data_conv: (batch_size, pre_activation_num_hidden, seq_len)
+        # TODO: add layer norm (can we do this without reshaping?!)
+
         if self.config.act_type == "glu":
             # GLU
             # two times: (batch_size, num_hidden, seq_len)

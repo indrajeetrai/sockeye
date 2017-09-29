@@ -79,6 +79,24 @@ class LayerNormalization:
         return inputs_norm
 
 
+class WeightNormalization:
+    """ Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868). """
+
+    def __init__(self, weight, num_hidden, ndim, prefix: str = ''):
+        self.prefix = prefix
+        # (num_hidden, d1, d2)
+        self.weight = weight
+        self.num_hidden = num_hidden
+        self.scale = mx.sym.Variable("%swn_scale" % prefix,
+                                     shape=tuple([num_hidden] + [1] * (ndim - 1)),
+                                     init=mx.init.Constant(value=1.0))
+
+    def __call__(self):
+        # Normalize each hidden dimension and scale afterwards
+        return mx.sym.broadcast_mul(lhs=mx.sym.L2Normalization(self.weight),
+                                    rhs=self.scale, name="%swn_scale" % self.prefix)
+
+
 def split_heads(x: mx.sym.Symbol, length: int, heads: int) -> mx.sym.Symbol:
     """
     Returns a symbol with head dimension folded into batch and depth divided by the number of heads.

@@ -912,6 +912,7 @@ class ConvolutionalDecoderConfig(Config):
     :param encoder_num_hidden: Number of hidden units of the encoder.
     :param num_layers: The number of convolutional layers.
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
+    :param weight_normalization: Weight normalization.
     :param embed_dropout: Dropout probability for target embeddings.
     :param hidden_dropout: Dropout probability on next decoder hidden state.
     """
@@ -924,6 +925,7 @@ class ConvolutionalDecoderConfig(Config):
                  encoder_num_hidden: int,
                  num_layers: int,
                  weight_tying: bool,
+                 weight_normalization: bool = False,
                  embed_dropout: float = .0,
                  hidden_dropout: float = .0) -> None:
         super().__init__()
@@ -937,6 +939,7 @@ class ConvolutionalDecoderConfig(Config):
         self.encoder_num_hidden = encoder_num_hidden
         self.num_layers = num_layers
         self.weight_tying = weight_tying
+        self.weight_normalization = weight_normalization
         self.embed_dropout = embed_dropout
         self.hidden_dropout = hidden_dropout
 
@@ -962,11 +965,11 @@ class ConvolutionalDecoder(Decoder):
                  embed_weight: Optional[mx.sym.Symbol] = None,
                  prefix: str = C.DECODER_PREFIX) -> None:
         self.config = config
-        # TODO: add weight norm
 
         if embed_weight is None:
             embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
 
+        # TODO: do you add weight norm to the embeddings?
         self.embedding = encoder.Embedding(self.config.num_embed,
                                            self.config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
@@ -983,6 +986,7 @@ class ConvolutionalDecoder(Decoder):
 
         self.i2h_weight = mx.sym.Variable('%si2h_weight' % prefix)
 
+        #TODO: should we add weight_norm here too?
         if self.config.weight_tying:
             check_condition(self.config.cnn_config.num_hidden == self.config.num_embed,
                             "Weight tying requires target embedding size and decoder hidden size to be equal")
