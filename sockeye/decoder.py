@@ -163,6 +163,13 @@ class Decoder(ABC):
         """
         return []
 
+    def get_max_seq_len(self) -> Optional[None]:
+        """
+        :return: The maximum length supported by the encoder if such a restriction exists.
+        """
+        return None
+
+
 
 class TransformerDecoder(Decoder):
     """
@@ -1249,3 +1256,7 @@ class ConvolutionalDecoder(Decoder):
         :raises: NotImplementedError
         """
         return []
+
+    def get_max_seq_len(self):
+        #  The positional embeddings potentially pose a limit on the maximum length at inference time.
+        return self.pos_embedding.get_max_seq_len()

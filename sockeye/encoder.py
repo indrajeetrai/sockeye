@@ -222,21 +222,27 @@ class Encoder(ABC):
 
     def get_num_hidden(self) -> int:
         """
-        Return the representation size of this encoder.
+        :return: The representation size of this encoder.
         """
         raise NotImplementedError()
 
     def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
         """
-        Returns a list of RNNCells used by this encoder.
+        :return: A list of RNNCells used by this encoder.
         """
         return []
 
     def get_encoded_seq_len(self, seq_len: int) -> int:
         """
-        Returns the size of the encoded sequence.
+        :return: The size of the encoded sequence.
         """
         return seq_len
+
+    def get_max_seq_len(self) -> Optional[None]:
+        """
+        :return: The maximum length supported by the encoder if such a restriction exists.
+        """
+        return None
 
 
 class BatchMajor2TimeMajor(Encoder):
@@ -413,6 +419,10 @@ class AdditivePositionalEmbedding(Encoder):
 
     def get_num_hidden(self) -> int:
         return self.num_embed
+
+    def get_max_seq_len(self):
+        # we can only support sentences as long as the maximum length during training.
+        return self.max_seq_len
 
 
 class EncoderSequence(Encoder):

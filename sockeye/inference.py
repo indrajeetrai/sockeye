@@ -62,8 +62,8 @@ class InferenceModel(model.SockeyeModel):
         config = model.SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
         super().__init__(config)
 
-        self.max_input_length = config.max_seq_len_source
-        self.get_max_output_length = get_max_output_length_function([self], max_output_length_num_stds)
+        self.max_input_length, self.get_max_output_length = get_max_input_output_length([self],
+                                                                                        max_output_length_num_stds)
 
         self.fname_params = os.path.join(model_folder, C.PARAMS_NAME % checkpoint if checkpoint else C.PARAMS_BEST_NAME)
 
@@ -91,12 +91,24 @@ class InferenceModel(model.SockeyeModel):
         :param max_input_length: Maximum input length.
         :param get_max_output_length_function: Callable to compute maximum output length.
         """
-        # TODO (IMPORTANT): with AdditivePositionalEmbedding we can't allow for longer sequences than the model was trained for
         self.max_input_length = max_input_length
-        if self.max_input_length != self.config.max_seq_len_source:
+        if self.max_input_length > self.config.max_seq_len_source:
             logger.warning("Model was trained with max_seq_len_source=%d, but using max_input_len=%d.",
                            self.config.max_seq_len_source, self.max_input_length)
         self.get_max_output_length = get_max_output_length_function
+
+        # check the maximum supported length of the encoder & decoder:
+        encoder_max_len_supported = self.encoder.get_max_seq_len()
+        if encoder_max_len_supported is not None:
+            utils.check_condition(self.max_input_length <= encoder_max_len_supported,
+                                  "Encoder only supports a maximum length of %d" % encoder_max_len_supported)
+        decoder_max_len_suppported = self.decoder.get_max_seq_len()
+        decoder_max_len = self.get_max_output_length(max_input_length)
+        if decoder_max_len_suppported is not None:
+            utils.check_condition(decoder_max_len <= decoder_max_len_suppported,
+                                  "Decoder only supports a maximum length of %d, but %d was requested. Note that the "
+                                  "maximum output length depends on the input length and the source/target length "
+                                  "ratio observed during training." % (decoder_max_len_suppported, decoder_max_len))
 
         self.encoder_module, self.encoder_default_bucket_key = self._get_encoder_module()
         self.decoder_module, self.decoder_default_bucket_key = self._get_decoder_module()
@@ -255,6 +267,14 @@ class InferenceModel(model.SockeyeModel):
         return probs, attention_probs, model_state
 
     @property
+    def max_seq_len_source(self):
+        return self.config.max_seq_len_source
+
+    @property
+    def max_seq_len_target(self):
+        return self.config.max_seq_len_target
+
+    @property
     def length_ratio_mean(self):
         return self.config.config_data.length_ratio_mean
 
@@ -303,17 +323,18 @@ def load_models(context: mx.context.Context,
     utils.check_condition(all(set(vocab.items()) == set(target_vocabs[0].items()) for vocab in target_vocabs),
                           "Target vocabulary ids do not match")
 
-    if max_input_len is None:
-        max_input_len = max(model.max_input_length for model in models)
     # set a common max_output length for all models.
-    get_max_output_length = get_max_output_length_function(models, max_output_length_num_stds)
+    max_input_len, get_max_output_length = get_max_input_output_length(models,
+                                                                       max_output_length_num_stds,
+                                                                       max_input_len)
     for model in models:
         model.initialize(max_input_len, get_max_output_length)
 
     return models, source_vocabs[0], target_vocabs[0]
 
 
-def get_max_output_length_function(models: List[InferenceModel], num_stds: int) -> Callable:
+def get_max_input_output_length(models: List[InferenceModel], num_stds: int,
+                                max_input_len: Optional[int]=None) -> Tuple[int, Callable]:
     """
     Returns a function to compute maximum output length given a fixed number of standard deviations as a
     safety margin, and the current input length.
@@ -323,18 +344,32 @@ def get_max_output_length_function(models: List[InferenceModel], num_stds: int) 
     :param models: List of models.
     :param num_stds: Number of standard deviations to add as a safety margin. If -1, returned maximum output lengths
                      will always be 2 * input_length.
-    :return: Callable.
+    :param max_input_len: An optional overwrite of the maximum input length.
+    :return: The maximum input length and a function to get the output length given the input length.
     """
     max_mean = max(model.length_ratio_mean for model in models)
     max_std = max(model.length_ratio_std for model in models)
 
-    def get_max_output_length(input_length: int):
-        if num_stds < 0:
-            return input_length * C.TARGET_MAX_LENGTH_FACTOR
+    if num_stds < 0:
+        factor = C.TARGET_MAX_LENGTH_FACTOR
+    else:
         factor = max_mean + (max_std * num_stds)
+
+    # Make sure the maximum input length and maximum output length never exceed their counterparts used during training.
+    # This is for example important for positional embeddings, which are only defined in these ranges.
+    max_seq_len_source = min(model.max_seq_len_source for model in models)
+    max_seq_len_target = min(model.max_seq_len_target for model in models)
+
+    if max_input_len is None:
+        if np.ceil(factor * max_seq_len_source) > max_seq_len_target:
+            max_input_len = int(np.floor(max_seq_len_target / factor))
+        else:
+            max_input_len = max_seq_len_source
+
+    def get_max_output_length(input_length: int):
         return int(np.ceil(factor * input_length))
 
-    return get_max_output_length
+    return max_input_len, get_max_output_length
 
 
 TranslatorInput = NamedTuple('TranslatorInput', [

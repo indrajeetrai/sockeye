@@ -188,7 +188,7 @@ def main():
         logger.info("Vocabulary sizes: source=%d target=%d", vocab_source_size, vocab_target_size)
 
         # create data iterators
-        max_seq_len_source, max_seq_len_target = args.max_seq_len
+        max_seq_len_source, max_seq_len_target = args.get_max_seq_len
         train_iter, eval_iter, config_data = data_io.get_training_data_iters(source=os.path.abspath(args.source),
                                                                              target=os.path.abspath(args.target),
                                                                              validation_source=os.path.abspath(
