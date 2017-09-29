@@ -304,7 +304,7 @@ class Embedding(Encoder):
 
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
         Encodes data given sequence lengths of individual examples and maximum sequence length.
@@ -374,14 +374,13 @@ class AdditivePositionalEmbedding(Encoder):
 
     def encode(self,
                data: mx.sym.Symbol,
-               data_length: mx.sym.Symbol,
+               data_length: Optional[mx.sym.Symbol],
                seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
         """
-
-       :param data: (batch_size, source_seq_len, num_embed)
-       :param data_length: (batch_size,)
-       :param seq_len: sequence length.
-       :return: (batch_size, source_seq_len, num_embed)
+        :param data: (batch_size, source_seq_len, num_embed)
+        :param data_length: (batch_size,)
+        :param seq_len: sequence length.
+        :return: (batch_size, source_seq_len, num_embed)
        """
 
         # (1, source_seq_len)
@@ -397,17 +396,12 @@ class AdditivePositionalEmbedding(Encoder):
 
     def encode_positions(self,
                          positions: mx.sym.Symbol,
-                         data: mx.sym.Symbol,
-                         data_length: mx.sym.Symbol,
-                         seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+                         data: mx.sym.Symbol) -> mx.sym.Symbol:
         """
-
-       :param positions: (batch_size, source_seq_len)
-       :param data: (batch_size, source_seq_len, num_embed)
-       :param data_length: (batch_size,)
-       :param seq_len: sequence length.
-       :return: (batch_size, source_seq_len, num_embed)
-       """
+        :param positions: (batch_size, source_seq_len)
+        :param data: (batch_size, source_seq_len, num_embed)
+        :return: (batch_size, source_seq_len, num_embed)
+        """
 
         # (batch_size, source_seq_len, num_embed)
         pos_embedding = mx.sym.Embedding(data=positions,
@@ -415,7 +409,7 @@ class AdditivePositionalEmbedding(Encoder):
                                          weight=self.embed_weight,
                                          output_dim=self.num_embed,
                                          name=self.prefix + "pos_embed")
-        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix), data_length, seq_len
+        return mx.sym.broadcast_add(data, pos_embedding, name="%s_add" % self.prefix)
 
     def get_num_hidden(self) -> int:
         return self.num_embed

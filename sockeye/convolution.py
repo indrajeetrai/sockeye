@@ -29,10 +29,11 @@ class ConvolutionConfig(Config):
     :param num_hidden: Size of hidden representation after convolution.
     :param act_type: The type of activation to use.
     """
+
     def __init__(self,
                  kernel_width: int,
                  num_hidden: int,
-                 act_type: str=C.GLU):
+                 act_type: str = C.GLU):
         super().__init__()
         self.kernel_width = kernel_width
         self.num_hidden = num_hidden
@@ -52,6 +53,7 @@ class ConvolutionBlock:
            the target sequence). 'centered' pads on both sides (for encoding the source sequence).
     :param prefix: Name prefix for symbols of this block.
     """
+
     def __init__(self,
                  config: ConvolutionConfig,
                  pad_type: str,
@@ -59,37 +61,45 @@ class ConvolutionBlock:
         self.prefix = prefix
         self.pad_type = pad_type
         self.config = config
-        self.conv_weight = mx.sym.Variable("%sconv_weight" % prefix)
+        #TODO: add weight norm
+        self.conv_weight = mx.sym.Variable("%sconv_weight" % prefix,
+                                           shape=(
+                                               self._pre_activation_num_hidden(),
+                                               self.config.num_hidden,
+                                               self.config.kernel_width)
+                                           )
         self.conv_bias = mx.sym.Variable("%sconv_bias" % prefix)
 
-    def __call__(self, data: mx.sym.Symbol,
+    def _pre_activation_num_hidden(self):
+        if self.config.act_type == "glu":
+            return 2 * self.config.num_hidden
+        else:
+            return self.config.num_hidden
+
+    def __call__(self,
+                 data: mx.sym.Symbol,
                  data_length: mx.sym.Symbol,
-                 seq_len: int,
-                 skip_padding=False) -> mx.sym.Symbol:
+                 seq_len: int) -> mx.sym.Symbol:
         """
+        Run the convolutional block.
+
         :param data: Input data. Shape: (batch_size, seq_len, num_hidden).
         :param data_length: Vector with sequence lengths. Shape: (batch_size,).
         :param seq_len: Maximum sequence length.
         :return: Symbol(batch_size, seq_len, num_hidden)
         """
-        if skip_padding:
-            padding = None
+        if self.pad_type == 'left':
+            # we pad enough on both sides and later slice the extra padding from the right
+            padding = (self.config.kernel_width - 1,)
+        elif self.pad_type == 'centered':
+            # we pad enough so that the output size is equal to the input size and we don't need to slice
+            utils.check_condition(self.config.kernel_width % 2 == 1,
+                                  "Only odd kernel widths supported, but got %d" % self.config.kernel_width)
+            padding = (int((self.config.kernel_width - 1) / 2),)
         else:
-            if self.pad_type == 'left':
-                # we pad enough on both sides and later slice the extra padding from the right
-                padding = (self.config.kernel_width - 1,)
-            elif self.pad_type == 'centered':
-                # we pad enough so that the output size is equal to the input size and we don't need to slice
-                utils.check_condition(self.config.kernel_width % 2 == 1,
-                                      "Only odd kernel widths supported, but got %d" % self.config.kernel_width)
-                padding = (int((self.config.kernel_width - 1)/2),)
-            else:
-                raise ValueError("Unknown pad type %s" % self.pad_type)
+            raise ValueError("Unknown pad type %s" % self.pad_type)
 
-        if self.config.act_type == "glu":
-            num_hidden = 2 * self.config.num_hidden
-        else:
-            num_hidden = self.config.num_hidden
+        num_hidden = self._pre_activation_num_hidden()
 
         # Apply masking (so that we properly have zero padding for variable sequence length batches)
         # Note: SequenceMask expects time-major data
@@ -97,30 +107,52 @@ class ConvolutionBlock:
         data = mx.sym.swapaxes(data, dim1=0, dim2=1)
         data = mx.sym.SequenceMask(data=data, sequence_length=data_length, use_sequence_length=True, value=0)
 
-        #TODO: better to transpose or to set the layout in the convolution? Do a speed comparison...
-        #TODO: does it make sense to implement convolutions for single time steps as FullyConnected (speed comparison...)
         # (batch_size,  num_hidden, seq_len)
         data = mx.sym.transpose(data, axes=(1, 2, 0))
-        if skip_padding:
-            data_conv = mx.sym.Convolution(data=data,
-                               weight=self.conv_weight,
-                               bias=self.conv_bias,
-                               kernel=(self.config.kernel_width,),
-                               num_filter=num_hidden,
-                               layout="NCW")
-        else:
-            data_conv = mx.sym.Convolution(data=data,
-                                           weight=self.conv_weight,
-                                           bias=self.conv_bias,
-                                           pad=padding,
-                                           kernel=(self.config.kernel_width,),
-                                           num_filter=num_hidden,
-                                           layout="NCW")
+        data_conv = mx.sym.Convolution(data=data,
+                                       weight=self.conv_weight,
+                                       bias=self.conv_bias,
+                                       pad=padding,
+                                       kernel=(self.config.kernel_width,),
+                                       num_filter=num_hidden,
+                                       layout="NCW")
 
         # (batch_size, 2 * num_hidden, seq_len)
-        if not skip_padding and self.pad_type == 'left':
+        if self.pad_type == 'left':
             data_conv = mx.sym.slice_axis(data=data_conv, axis=2, begin=0, end=seq_len)
 
+        return self._post_convolution(data_conv)
+
+    def step(self, data):
+        """
+        Run convolution over a single position. The data must be exactly as wide as the convolution filters.
+
+        :param data: Shape: (batch_size, kernel_width, num_hidden).
+        :return: Single result of a convolution. Shape: (batch_size, 1, num_hidden).
+        """
+
+        # As we only run convolution over a single window that is exactly the size of the convolutional filter
+        # we can use FullyConnected instead of Convolution for efficiency reasons. Additionally we do not need to
+        # perform any masking.
+
+        num_hidden = self._pre_activation_num_hidden()
+
+        # (batch_size, num_hidden, kernel_width)
+        data = mx.sym.swapaxes(data, dim1=1, dim2=2)
+        # (batch_size, num_hidden * kernel_width)
+        data = mx.sym.reshape(data, shape=(0, -3))
+        # (preact_num_hidden, num_hidden * kernel_width)
+        weight = mx.sym.reshape(self.conv_weight, shape=(0, -3))
+        data_conv = mx.sym.FullyConnected(data=data,
+                                          weight=weight,
+                                          bias=self.conv_bias,
+                                          num_hidden=num_hidden)
+        # (batch_size, num_hidden, 1)
+        data_conv = mx.sym.expand_dims(data_conv, axis=2)
+        return self._post_convolution(data_conv)
+
+    def _post_convolution(self, data_conv):
+        #TODO: add layer norm
         if self.config.act_type == "glu":
             # GLU
             # two times: (batch_size, num_hidden, seq_len)
@@ -129,12 +161,10 @@ class ConvolutionBlock:
             block_output = mx.sym.broadcast_mul(gate_a,
                                                 mx.sym.Activation(data=gate_b, act_type="sigmoid"))
         else:
-            #TODO: does it make sense to add layer normalization?
             # (batch_size, num_hidden, seq_len)
             block_output = mx.sym.Activation(data_conv, act_type=self.config.act_type)
 
         # (batch_size, seq_len, num_hidden)
         block_output = mx.sym.swapaxes(block_output, dim1=1, dim2=2)
         return block_output
-
 
