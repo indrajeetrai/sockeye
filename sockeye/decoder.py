@@ -972,7 +972,6 @@ class ConvolutionalDecoder(Decoder):
         if embed_weight is None:
             embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
 
-        # TODO: do you add weight norm to the embeddings?
         self.embedding = encoder.Embedding(self.config.num_embed,
                                            self.config.vocab_size,
                                            prefix=C.TARGET_EMBEDDING_PREFIX,
