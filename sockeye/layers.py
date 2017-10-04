@@ -80,18 +80,26 @@ class LayerNormalization:
 
 
 class WeightNormalization:
-    """ Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868). """
+    """
+    Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).
+    For a given tensor the normalization is done per hidden dimension.
+
+    :param weight: Weight tensor of shape: (num_hidden, d1, d2, ...).
+    :param num_hidden: Size of the first dimension.
+    :param ndim: The total number of dimensions of the weight tensor.
+    :param prefix: The prefix used for naming.
+    """
 
     def __init__(self, weight, num_hidden, ndim, prefix: str = ''):
         self.prefix = prefix
-        # (num_hidden, d1, d2, ...)
         self.weight = weight
         self.num_hidden = num_hidden
         self.scale = mx.sym.Variable("%swn_scale" % prefix,
                                      shape=tuple([num_hidden] + [1] * (ndim - 1)),
                                      init=mx.init.Constant(value=1.0))
 
-    def __call__(self):
+    def __call__(self) -> mx.sym.Symbol:
+        """ :return: A weight normalized weight tensor. """
         # Normalize each hidden dimension and scale afterwards
         return mx.sym.broadcast_mul(lhs=mx.sym.L2Normalization(self.weight),
                                     rhs=self.scale, name="%swn_scale" % self.prefix)
