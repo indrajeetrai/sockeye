@@ -30,7 +30,6 @@ from . import layers
 from . import lexicon as lexicons
 from . import rnn
 from . import convolution
-from . import rnn_attention
 from . import transformer
 from . import utils
 
@@ -43,7 +42,7 @@ def get_decoder(config: Config,
     if isinstance(config, RecurrentDecoderConfig):
         return RecurrentDecoder(config=config, lexicon=lexicon, embed_weight=embed_weight, prefix=C.RNN_DECODER_PREFIX)
     elif isinstance(config, ConvolutionalDecoderConfig):
-        return ConvolutionalDecoder(config=config, embed_weight=embed_weight, prefix=C.CONVOLUTIONAL_DECODER_PREFIX)
+        return ConvolutionalDecoder(config=config, embed_weight=embed_weight, prefix=C.CNN_DECODER_PREFIX)
     elif isinstance(config, transformer.TransformerConfig):
         return TransformerDecoder(config=config, embed_weight=embed_weight, prefix=C.TRANSFORMER_DECODER_PREFIX)
     else:
