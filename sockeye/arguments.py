@@ -285,6 +285,11 @@ def add_model_parameters(params):
                               choices=C.CNN_ACTIVATION_TYPES,
                               default=C.GLU,
                               help="Type activation to use for each convolutional layer. Default: %(default)s.")
+    model_params.add_argument('--cnn-positional-embedding-type',
+                              choices=C.POSITIONAL_EMBEDDING_TYPES,
+                              default=C.LEARNED_POSITIONAL_EMBEDDING,
+                              help='The type of positional embedding. Default: %(default)s.')
+
 
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',
@@ -329,9 +334,10 @@ def add_model_parameters(params):
                               default=2048,
                               help='Number of hidden units in feed forward layers when using transformer. '
                                    'Default: %(default)s.')
-    model_params.add_argument('--transformer-no-positional-encodings',
-                              action='store_true',
-                              help='Do not use positional encodings.')
+    model_params.add_argument('--transformer-positional-embedding-type',
+                              choices=C.POSITIONAL_EMBEDDING_TYPES,
+                              default=C.LEARNED_POSITIONAL_EMBEDDING,
+                              help='The type of positional embedding. Default: %(default)s.')
     model_params.add_argument('--transformer-preprocess',
                               type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
                               default=('', ''),

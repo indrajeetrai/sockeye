@@ -21,6 +21,8 @@ from typing import Optional
 
 import mxnet as mx
 
+import sockeye.embeddings
+import sockeye.encoder
 from sockeye.config import Config
 from sockeye.utils import check_condition
 from . import rnn_attention as attentions
@@ -158,7 +160,6 @@ class Decoder(ABC):
         """
         Returns a list of RNNCells used by this decoder.
 
-        :raises: NotImplementedError
         """
         return []
 
@@ -200,12 +201,16 @@ class TransformerDecoder(Decoder):
         if embed_weight is None:
             embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
 
-        self.embedding = encoder.Embedding(num_embed=config.model_size,
-                                           vocab_size=config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           dropout=config.dropout_prepost,
-                                           embed_weight=embed_weight,
-                                           add_positional_encoding=config.positional_encodings)
+        self.embedding = sockeye.encoder.Embedding(num_embed=config.model_size,
+                                                   vocab_size=config.vocab_size,
+                                                   prefix=C.TARGET_EMBEDDING_PREFIX,
+                                                   dropout=config.dropout_prepost,
+                                                   embed_weight=embed_weight)
+        self.pos_embedding = sockeye.encoder.get_positional_embedding(config.positional_embedding_type,
+                                                                      config.model_size,
+                                                                      max_seq_len=config.max_seq_len_target,
+                                                                      prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
+
         if self.config.weight_tying:
             logger.info("Tying the target embeddings and prediction matrix.")
             self.cls_w = embed_weight
@@ -245,6 +250,7 @@ class TransformerDecoder(Decoder):
 
         # target: (batch_size, target_max_length, model_size)
         target, target_lengths, target_max_length = self.embedding.encode(target, target_lengths, target_max_length)
+        target, target_lengths, target_max_length = self.pos_embedding.encode(target, target_lengths, target_max_length)
 
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
@@ -294,6 +300,9 @@ class TransformerDecoder(Decoder):
         target, target_lengths, target_max_length = self.embedding.encode(target,
                                                                           target_lengths,
                                                                           target_max_length)
+        target, target_lengths, target_max_length = self.pos_embedding.encode(target,
+                                                                              target_lengths,
+                                                                              target_max_length)
 
         for layer in self.layers:
             target = layer(target, target_lengths, target_max_length, target_bias,
@@ -360,6 +369,10 @@ class TransformerDecoder(Decoder):
                                (batch_size, source_encoded_max_length, source_encoded_depth),
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")]
+
+    def get_max_seq_len(self):
+        #  The positional embeddings potentially pose a limit on the maximum length at inference time.
+        return self.pos_embedding.get_max_seq_len()
 
 
 RecurrentDecoderState = NamedTuple('RecurrentDecoderState', [
@@ -483,11 +496,11 @@ class RecurrentDecoder(Decoder):
         # Embedding & output parameters
         if embed_weight is None:
             embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
-        self.embedding = encoder.Embedding(self.config.num_embed,
-                                           self.config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           dropout=config.embed_dropout,
-                                           embed_weight=embed_weight)
+        self.embedding = sockeye.encoder.Embedding(self.config.num_embed,
+                                                   self.config.vocab_size,
+                                                   prefix=C.TARGET_EMBEDDING_PREFIX,
+                                                   dropout=config.embed_dropout,
+                                                   embed_weight=embed_weight)
         if self.config.weight_tying:
             check_condition(self.num_hidden == self.config.num_embed,
                             "Weight tying requires target embedding size and rnn_num_hidden to be equal")
@@ -909,6 +922,7 @@ class ConvolutionalDecoderConfig(Config):
     :param num_embed: Target word embedding size.
     :param encoder_num_hidden: Number of hidden units of the encoder.
     :param num_layers: The number of convolutional layers.
+    :param positional_embedding_type: The type of positional embedding.
     :param weight_tying: Whether to share embedding and prediction parameter matrices.
     :param weight_normalization: Weight normalization.
     :param embed_dropout: Dropout probability for target embeddings.
@@ -922,6 +936,7 @@ class ConvolutionalDecoderConfig(Config):
                  num_embed: int,
                  encoder_num_hidden: int,
                  num_layers: int,
+                 positional_embedding_type: str,
                  weight_tying: bool,
                  weight_normalization: bool = False,
                  embed_dropout: float = .0,
@@ -936,6 +951,7 @@ class ConvolutionalDecoderConfig(Config):
         self.num_embed = num_embed
         self.encoder_num_hidden = encoder_num_hidden
         self.num_layers = num_layers
+        self.positional_embedding_type = positional_embedding_type
         self.weight_tying = weight_tying
         self.weight_normalization = weight_normalization
         self.embed_dropout = embed_dropout
@@ -976,14 +992,15 @@ class ConvolutionalDecoder(Decoder):
         if embed_weight is None:
             embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
 
-        self.embedding = encoder.Embedding(self.config.num_embed,
-                                           self.config.vocab_size,
-                                           prefix=C.TARGET_EMBEDDING_PREFIX,
-                                           embed_weight=embed_weight,
-                                           dropout=config.embed_dropout)
-        self.pos_embedding = encoder.AdditivePositionalEmbedding(num_embed=config.num_embed,
-                                                                 max_seq_len=config.max_seq_len_target,
-                                                                 prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
+        self.embedding = sockeye.encoder.Embedding(self.config.num_embed,
+                                                   self.config.vocab_size,
+                                                   prefix=C.TARGET_EMBEDDING_PREFIX,
+                                                   embed_weight=embed_weight,
+                                                   dropout=config.embed_dropout)
+        self.pos_embedding = sockeye.encoder.get_positional_embedding(config.positional_embedding_type,
+                                                                      config.num_embed,
+                                                                      max_seq_len=config.max_seq_len_target,
+                                                                      prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX)
 
         self.layers = [convolution.ConvolutionBlock(
             config.cnn_config,
@@ -1125,7 +1142,7 @@ class ConvolutionalDecoder(Decoder):
         :return: logits, attention probabilities, next decoder states.
         """
 
-        # (batch_size, target_max_length)
+        # (batch_size,)
         target_lengths = utils.compute_lengths(target)
         indices = target_lengths - 1  # type: mx.sym.Symbol
 
@@ -1268,14 +1285,6 @@ class ConvolutionalDecoder(Decoder):
                                (batch_size, source_encoded_max_length, source_encoded_depth),
                                layout=C.BATCH_MAJOR),
                 mx.io.DataDesc(C.SOURCE_LENGTH_NAME, (batch_size,), layout="N")] + next_layer_inputs
-
-    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
-        """
-        Returns a list of RNNCells used by this decoder.
-
-        :raises: NotImplementedError
-        """
-        return []
 
     def get_max_seq_len(self):
         #  The positional embeddings potentially pose a limit on the maximum length at inference time.

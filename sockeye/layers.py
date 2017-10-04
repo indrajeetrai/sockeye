@@ -415,21 +415,21 @@ class PositionalEncodings(mx.operator.CustomOp):
 
     @staticmethod
     def get_encodings(length, depth) -> np.ndarray:
-        actual_length = length
-        length += 1 if length % 2 != 0 else 0
+        utils.check_condition(depth % 2 == 0, "Positional embeddings require an even embedding size it "
+                                              "is however %d." % depth)
         # (1, depth)
-        channels = np.arange(depth).reshape((1, -1))
-        # (length/2, 1)
-        positions_even = np.arange(0, length, 2).reshape((-1, 1))
-        # (length/2, 1)
-        positions_odd = np.arange(1, length, 2).reshape((-1, 1))
-        # sinusoids for even positions: (length/2, depth)
-        sin = np.sin(positions_even / np.power(10000, (2 * channels) / depth))
-        # cosines for odd positions: (length/2, depth)
-        cos = np.cos(positions_odd / np.power(10000, (2 * channels) / depth))
+        channels = np.arange(depth // 2).reshape((1, -1))
+
+        # (length, 1)
+        positions = np.arange(0, length).reshape((-1, 1))
+        scaled_positions = positions / np.power(10000, (2 * channels) / depth)
+        # sinusoids:
+        sin = np.sin(scaled_positions)
+        # cosines:
+        cos = np.cos(scaled_positions)
         # interleave: (1, length, num_embed)
         encodings = np.hstack([sin, cos]).reshape(1, length, depth)
-        return encodings[:, :actual_length, :]
+        return encodings
 
     def forward(self, is_train, req, in_data, out_data, aux):
         self.assign(out_data[0], req[0], self.encodings)
