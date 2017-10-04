@@ -953,7 +953,11 @@ class ConvolutionalDecoder(Decoder):
 
     Notable differences to Gehring et al. 2017:
      * Here the context vectors are created from the last encoder state (instead of using the last encoder state as the
-       key and the sum of the last encoder state and the source embedding as the value)
+       key and the sum of the encoder state and the source embedding as the value)
+     * The encoder are not scaled down by 1/(2 * num_attention_layers).
+     * Residual connections are not scaled down by math.sqrt(0.5).
+     * Here we do the attention in the hidden dim (they do it in the embedding dim).
+     * Weight normalization: where is weight norm applied?
 
     :param config: Configuration for convolutional decoder.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new target embedding.
@@ -986,7 +990,7 @@ class ConvolutionalDecoder(Decoder):
 
         self.i2h_weight = mx.sym.Variable('%si2h_weight' % prefix)
 
-        #TODO: should we add weight_norm here too?
+        # TODO: should we add weight_norm here too?
         if self.config.weight_tying:
             check_condition(self.config.cnn_config.num_hidden == self.config.num_embed,
                             "Weight tying requires target embedding size and decoder hidden size to be equal")

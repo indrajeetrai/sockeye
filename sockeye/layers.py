@@ -84,7 +84,7 @@ class WeightNormalization:
 
     def __init__(self, weight, num_hidden, ndim, prefix: str = ''):
         self.prefix = prefix
-        # (num_hidden, d1, d2)
+        # (num_hidden, d1, d2, ...)
         self.weight = weight
         self.num_hidden = num_hidden
         self.scale = mx.sym.Variable("%swn_scale" % prefix,
