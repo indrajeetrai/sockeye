@@ -15,8 +15,6 @@ from typing import Optional
 
 import mxnet as mx
 import numpy as np
-from sockeye.encoder import ConvolutionalEmbeddingConfig
-
 from . import config
 from . import layers
 
@@ -36,7 +34,7 @@ class TransformerConfig(config.Config):
                  positional_encodings: bool,
                  preprocess_sequence: str,
                  postprocess_sequence: str,
-                 conv_config: Optional[ConvolutionalEmbeddingConfig] = None) -> None:  # type: ignore
+                 conv_config: Optional['ConvolutionalEmbeddingConfig'] = None) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
