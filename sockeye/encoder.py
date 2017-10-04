@@ -89,7 +89,7 @@ class ConvolutionalEncoderConfig(Config):
                  embed_dropout: float,
                  max_seq_len_source: int,
                  cnn_config: convolution.ConvolutionConfig,
-                 num_layers: int):
+                 num_layers: int) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed

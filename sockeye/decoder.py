@@ -1132,7 +1132,7 @@ class ConvolutionalDecoder(Decoder):
         # but none of the previous hidden vectors
         last_layer_state = None
         embed_layer_state = layer_states[0]
-        cnn_layer_states = layer_states[1:] + [last_layer_state]
+        cnn_layer_states = list(layer_states[1:]) + [last_layer_state]
 
         kernel_width = self.config.cnn_config.kernel_width
 

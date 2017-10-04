@@ -45,3 +45,7 @@ def test_layer_normalization():
     expected_norm = (x_np - expected_mean) / np.sqrt(expected_var)
 
     assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
+
+
+def test_weight_normalization():
+    pass
