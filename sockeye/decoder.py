@@ -968,6 +968,11 @@ class ConvolutionalDecoder(Decoder):
                  prefix: str = C.DECODER_PREFIX) -> None:
         self.config = config
 
+        # TODO: potentially project the encoder hidden size to the decoder hidden size.
+        utils.check_condition(config.encoder_num_hidden == config.cnn_config.num_hidden,
+                              "We need to have the same number of hidden units in the decoder "
+                              "as we have in the encoder")
+
         if embed_weight is None:
             embed_weight = mx.sym.Variable(C.TARGET_EMBEDDING_PREFIX + "weight")
 
