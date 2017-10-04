@@ -90,7 +90,7 @@ class WeightNormalization:
     :param prefix: The prefix used for naming.
     """
 
-    def __init__(self, weight, num_hidden, ndim, prefix: str = ''):
+    def __init__(self, weight, num_hidden, ndim=2, prefix: str = ''):
         self.prefix = prefix
         self.weight = weight
         self.num_hidden = num_hidden

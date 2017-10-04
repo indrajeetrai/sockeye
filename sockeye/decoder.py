@@ -170,7 +170,6 @@ class Decoder(ABC):
         return None
 
 
-
 class TransformerDecoder(Decoder):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
@@ -954,10 +953,10 @@ class ConvolutionalDecoder(Decoder):
     Notable differences to Gehring et al. 2017:
      * Here the context vectors are created from the last encoder state (instead of using the last encoder state as the
        key and the sum of the encoder state and the source embedding as the value)
-     * The encoder are not scaled down by 1/(2 * num_attention_layers).
+     * The encoder gradients are not scaled down by 1/(2 * num_attention_layers).
      * Residual connections are not scaled down by math.sqrt(0.5).
-     * Here we do the attention in the hidden dim (they do it in the embedding dim).
-     * Weight normalization: where is weight norm applied?
+     * Attention is computed in the hidden dimension instead of the embedding dimension (removes need for training
+       several projection matrices)
 
     :param config: Configuration for convolutional decoder.
     :param embed_weight: Optionally use an existing embedding matrix instead of creating a new target embedding.
@@ -990,7 +989,6 @@ class ConvolutionalDecoder(Decoder):
 
         self.i2h_weight = mx.sym.Variable('%si2h_weight' % prefix)
 
-        # TODO: should we add weight_norm here too?
         if self.config.weight_tying:
             check_condition(self.config.cnn_config.num_hidden == self.config.num_embed,
                             "Weight tying requires target embedding size and decoder hidden size to be equal")
@@ -998,7 +996,18 @@ class ConvolutionalDecoder(Decoder):
             logger.info("Tying the target embeddings and prediction matrix.")
             self.cls_w = embed_weight
         else:
-            self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
+            if self.config.weight_normalization:
+                self.cls_w = mx.sym.Variable("%scls_weight" % prefix, shape=(self.config.vocab_size,
+                                                                             self.config.cnn_config.num_hidden))
+                self.weight_norm = layers.WeightNormalization(self.cls_w,
+                                                              num_hidden=self.config.vocab_size,
+                                                              ndim=2,
+                                                              prefix="%scls_" % prefix)
+                self.cls_w = self.weight_norm()
+
+            else:
+                self.cls_w = mx.sym.Variable("%scls_weight" % prefix)
+                self.weight_norm = None
         self.cls_b = mx.sym.Variable("%scls_bias" % prefix)
 
     def decode_sequence(self,
