@@ -336,7 +336,7 @@ def add_model_parameters(params):
                                    'Default: %(default)s.')
     model_params.add_argument('--transformer-positional-embedding-type',
                               choices=C.POSITIONAL_EMBEDDING_TYPES,
-                              default=C.LEARNED_POSITIONAL_EMBEDDING,
+                              default=C.FIXED_POSITIONAL_EMBEDDING,
                               help='The type of positional embedding. Default: %(default)s.')
     model_params.add_argument('--transformer-preprocess',
                               type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),

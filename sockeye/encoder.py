@@ -123,7 +123,13 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig, fused: bool,
                               embed_weight=embed_weight))
 
     if config.conv_config is not None:
-        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config))
+        encoders.append(ConvolutionalEmbeddingEncoder(config.conv_config,
+                                                      prefix=C.CHAR_SEQ_ENCODER_PREFIX))
+        if config.conv_config.add_positional_encoding:
+            # If specified, add positional encodings to segment embeddings
+            # (TransformerEncoder compatibility, not in original paper)
+            encoders.append(AddSinCosPositionalEmbeddings(num_embed=config.num_embed,
+                                                          prefix="%sadd_positional_encodings" % C.CHAR_SEQ_ENCODER_PREFIX))
 
     encoders.append(BatchMajor2TimeMajor())
 
@@ -853,6 +859,7 @@ class ConvolutionalEmbeddingConfig(Config):
     :param pool_stride: Stride for pooling layer after convolutions.
     :param num_highway_layers: Number of highway layers for segment embeddings.
     :param dropout: Dropout probability.
+    :param add_positional_encoding: Dropout probability.
     """
 
     def __init__(self,
@@ -1025,16 +1032,6 @@ class ConvolutionalEmbeddingEncoder(Encoder):
         # (batch_size, encoded_seq_len, num_segment_emded)
         seg_embedding = mx.sym.Reshape(data=seg_embedding,
                                        shape=(-1, encoded_seq_len, self.output_dim))
-
-        # If specified, add positional encodings to segment embeddings
-        # (TransformerEncoder compatibility, not in original paper)
-        if self.add_positional_encoding:
-            seg_embedding = mx.sym.broadcast_add(seg_embedding,
-                                                 Embedding.get_positional_encoding(
-                                                     length=encoded_seq_len,
-                                                     depth=self.output_dim,
-                                                     name="%spositional_encodings" % self.prefix),
-                                                 name='%sadd_positional_encodings' % self.prefix)
 
         # Dropout on final segment embeddings
         if self.dropout > 0:
