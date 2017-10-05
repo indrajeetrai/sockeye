@@ -290,7 +290,6 @@ def add_model_parameters(params):
                               default=C.LEARNED_POSITIONAL_EMBEDDING,
                               help='The type of positional embedding. Default: %(default)s.')
 
-
     # rnn arguments
     model_params.add_argument('--rnn-cell-type',
                               choices=C.CELL_TYPES,

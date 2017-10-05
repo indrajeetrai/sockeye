@@ -25,8 +25,8 @@ _LINE_MAX_LENGTH = 9
 
 @pytest.mark.parametrize("train_params, translate_params, perplexity_thresh, bleu_thresh", [
     # "Vanilla" LSTM encoder-decoder with attention
-    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
-     " --attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
+    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
+     " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
      " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
      " --rnn-dropout-states 0.0:0.1 --embed-dropout 0.1:0.0",
      "--beam-size 5",
@@ -34,7 +34,7 @@ _LINE_MAX_LENGTH = 9
      0.98),
     # 2-layer transformer encoder, LSTM decoder with attention
     ("--encoder transformer --num-layers 2:1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
-     " --attention-type mhdot --attention-num-hidden 32 --batch-size 16 --attention-mhdot-heads 1"
+     " --rnn-attention-type mhdot --rnn-attention-num-hidden 32 --batch-size 16 --rnn-attention-mhdot-heads 1"
      " --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
      " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
@@ -62,6 +62,17 @@ _LINE_MAX_LENGTH = 9
      "--beam-size 1",
      1.01,
      0.999),
+    # 3-layer cnn
+    ("--encoder cnn --decoder cnn "
+     "--batch-size 16 --num-layers 3 --max-updates 3000"
+     "--cnn-num-hidden 32 "
+     " --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64"
+     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001"
+     " --layer-normalization",
+     "--beam-size 1",
+     1.01,
+     0.999)
 ])
 def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
@@ -88,15 +99,15 @@ def test_seq_copy(train_params, translate_params, perplexity_thresh, bleu_thresh
 
 @pytest.mark.parametrize("train_params, translate_params, perplexity_thresh, bleu_thresh", [
     # "Vanilla" LSTM encoder-decoder with attention
-    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --attention-type mlp"
-     " --attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity --max-updates 10000"
-     " --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
+    ("--encoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32 --rnn-attention-type mlp"
+     " --rnn-attention-num-hidden 32 --batch-size 16 --loss cross-entropy --optimized-metric perplexity "
+     "--max-updates 10000 --checkpoint-frequency 1000 --optimizer adam --initial-learning-rate 0.001",
      "--beam-size 5",
      1.03,
      0.98),
     # 1-layer transformer encoder, LSTM decoder with attention
     ("--encoder transformer --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 64 --num-embed 32"
-     " --attention-type mhdot --attention-num-hidden 32 --batch-size 16 --attention-mhdot-heads 2"
+     " --rnn-attention-type mhdot --rnn-attention-num-hidden 32 --batch-size 16 --rnn-attention-mhdot-heads 2"
      " --loss cross-entropy --optimized-metric perplexity --max-updates 8000"
      " --transformer-attention-heads 4 --transformer-model-size 64"
      " --transformer-feed-forward-num-hidden 64"
