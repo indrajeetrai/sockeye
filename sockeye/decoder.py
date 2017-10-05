@@ -165,7 +165,7 @@ class Decoder(ABC):
 
     def get_max_seq_len(self) -> Optional[None]:
         """
-        :return: The maximum length supported by the encoder if such a restriction exists.
+        :return: The maximum length supported by the decoder if such a restriction exists.
         """
         return None
 
